@@ -25,6 +25,8 @@ export const envSchema = z
     RESEND_WEBHOOK_SECRET: optional,
     SMTP_HOST: z.string().default("localhost"),
     SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(1025),
+    SMTP_USER: optional,
+    SMTP_PASS: optional,
     TURNSTILE_SITE_KEY: optional,
     TURNSTILE_SECRET_KEY: optional,
     CLOUDINARY_CLOUD_NAME: optional,
