@@ -4,7 +4,7 @@ export const site = {
   tagline: "Safer Streets. Smarter Journeys. Stronger Communities.",
   description:
     "Report unsafe spots, share an auto, and let someone you trust know you're on your way. One account, four tools, built for campuses and commuters in India.",
-  origin: process.env.APP_ORIGIN ?? "http://localhost:3000",
+  origin: process.env.APP_ORIGIN?.trim() || "http://localhost:3000",
   /** Shown on legal pages. Replace before launch (DPDP Act grievance officer). */
   grievance: {
     officer: "[Grievance officer name: to be added before launch]",
