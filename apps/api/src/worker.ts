@@ -10,7 +10,10 @@ import { createRuntime, isEntry, onShutdown } from "./runtime.js";
 
 export const PGBOSS_SCHEMA = "pgboss";
 
-export async function startWorker(env: Env): Promise<{ boss: PgBoss; stop: () => Promise<void> }> {
+export async function startWorker(
+  env: Env,
+  options: { registerShutdown?: boolean } = {},
+): Promise<{ boss: PgBoss; stop: () => Promise<void> }> {
   const rt = createRuntime(env);
   const log = rt.logger.child({ role: "worker" });
   const boss = new PgBoss({
@@ -38,7 +41,9 @@ export async function startWorker(env: Env): Promise<{ boss: PgBoss; stop: () =>
     await rt.prisma.$disconnect();
     await rt.pool.end();
   };
-  onShutdown(log, stop);
+  if (options.registerShutdown ?? true) {
+    onShutdown(log, stop);
+  }
   return { boss, stop };
 }
 

@@ -1,7 +1,10 @@
-// Single build, two behaviours (Part B1): ROLE=server (HTTP) or ROLE=worker (pg-boss jobs).
+// Single build, two behaviours:
+// ROLE=server (HTTP API) or ROLE=worker (pg-boss jobs).
+
 import { loadEnv } from "./config/env.js";
 
 const env = loadEnv();
+
 if (env.ROLE === "worker") {
   const { startWorker } = await import("./worker.js");
   await startWorker(env);
