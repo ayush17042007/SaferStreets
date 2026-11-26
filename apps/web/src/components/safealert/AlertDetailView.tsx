@@ -159,6 +159,7 @@ function VoteCard({ alert, signedIn, queryKey }: { alert: AlertDto; signedIn: bo
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey });
       void qc.invalidateQueries({ queryKey: ["alerts"] });
+      void qc.invalidateQueries({ queryKey: ["saferoute"] });
     },
     onError: (err) => toast.show(errMsg(err, "We couldn't save your vote. Try again."), "error"),
   });
@@ -237,6 +238,7 @@ function ActionsBar({ alert, signedIn, queryKey }: { alert: AlertDto; signedIn: 
       setResolving(false);
       void qc.invalidateQueries({ queryKey });
       void qc.invalidateQueries({ queryKey: ["alerts"] });
+      void qc.invalidateQueries({ queryKey: ["saferoute"] });
       toast.show("Alert marked resolved.");
     },
     onError: (err) => {
@@ -348,6 +350,7 @@ function ModeratorPanel({ alert, queryKey }: { alert: AlertDto; queryKey: string
       setConfirm(null);
       void qc.invalidateQueries({ queryKey });
       void qc.invalidateQueries({ queryKey: ["alerts"] });
+      void qc.invalidateQueries({ queryKey: ["saferoute"] });
       toast.show("Alert updated.");
     },
     onError: (err) => {

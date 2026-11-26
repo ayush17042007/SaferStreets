@@ -131,6 +131,16 @@ export function journeysRoutes(deps: {
       handlers: [respond((req) => service.triggerSos(uid(req), idOf(req)))],
     },
     {
+      method: "post",
+      path: "/journeys/:id/confirm-safety",
+      summary: "Confirm safety and clear an active deviation, stop, or SOS state",
+      tags: ["journeyguard"],
+      auth: "user",
+      request: idp,
+      responses: ok,
+      handlers: [respond((req) => service.confirmSafety(uid(req), idOf(req)))],
+    },
+    {
       method: "get",
       path: "/track/:token",
       summary: "Trusted-contact page: first name, destination, expected arrival, status only",

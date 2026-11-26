@@ -77,14 +77,33 @@ export function TrackView({ token }: { token: string }) {
               <h1 className="type-h2 break-words">
                 {load.data.firstName} is travelling to {load.data.destinationText}
               </h1>
-              <p className="text-[14px] leading-5">
-                Expected arrival:{" "}
-                <span className="font-semibold">{formatDateTime(load.data.expectedArrivalAt)} IST</span>
-              </p>
-              <p className="text-[14px] leading-5 text-text-secondary">
-                SaferStreets does not show live location. This page only shows the arrival time {load.data.firstName}{" "}
-                set.
-              </p>
+              {load.data.trackingEnabled ? (
+                <div className="flex flex-col gap-1 text-[14px] leading-5">
+                  <p>
+                    Safety status: <span className="font-semibold">{load.data.safetyState.replace(/_/g, " ")}</span>
+                  </p>
+                  {load.data.lastLat !== null && load.data.lastLng !== null ? (
+                    <p className="text-text-secondary">
+                      Last known GPS:{" "}
+                      <a
+                        href={`https://www.openstreetmap.org/?mlat=${load.data.lastLat}&mlon=${load.data.lastLng}#map=16/${load.data.lastLat}/${load.data.lastLng}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold text-ink underline"
+                      >
+                        {load.data.lastLat.toFixed(5)}, {load.data.lastLng.toFixed(5)}
+                      </a>
+                      {load.data.lastLocationAt ? ` (${formatDateTime(load.data.lastLocationAt)} IST)` : ""}
+                    </p>
+                  ) : (
+                    <p className="text-text-secondary">Waiting for the first GPS location update.</p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-[14px] leading-5 text-text-secondary">
+                  Live location sharing is off for this journey.
+                </p>
+              )}
             </Card>
 
             <Banner tone="neutral" icon="emergency">

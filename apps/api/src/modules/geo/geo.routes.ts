@@ -1,4 +1,4 @@
-import { latitudeSchema, longitudeSchema } from "@saferstreets/shared";
+import { haversineKm, latitudeSchema, longitudeSchema } from "@saferstreets/shared";
 import type { RequestHandler } from "express";
 import { z } from "zod";
 import type { RouteDef } from "../../http/routes.js";
@@ -34,7 +34,45 @@ export function geoRoutes(deps: { service: GeoService; limiters: RateLimiters })
       next(err);
     }
   };
+  const emergencyServices: RequestHandler = async (req, res, next) => {
+    try {
+      const { lat, lng } = req.query as unknown as z.infer<typeof reverseQuery>;
+      const withDist = (places: Array<{ label: string; lat: number; lng: number }>) =>
+        places
+          .map((p) => ({
+            ...p,
+            distanceKm: Number(haversineKm({ lat, lng }, { lat: p.lat, lng: p.lng }).toFixed(2)),
+          }))
+          .sort((a, b) => a.distanceKm - b.distanceKm)
+          .slice(0, 3);
+      const [police, ambulance, fire] = await Promise.all([
+        service.search("police station").catch(() => []),
+        service.search("hospital").catch(() => []),
+        service.search("fire station").catch(() => []),
+      ]);
+      res.setHeader("Cache-Control", "private, max-age=300");
+      res.json({
+        data: {
+          police: withDist(police),
+          ambulance: withDist(ambulance),
+          fire: withDist(fire),
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  };
   return [
+    {
+      method: "get",
+      path: "/geo/emergency-services",
+      summary: "Nearby police stations, hospitals/ambulance and fire stations via MapTiler",
+      tags: ["geo"],
+      auth: "user",
+      request: { query: reverseQuery },
+      responses: { 200: { description: "Nearby emergency service places" } },
+      handlers: [rateLimit(limiters.geoSearch, "user"), emergencyServices],
+    },
     {
       method: "get",
       path: "/geo/search",

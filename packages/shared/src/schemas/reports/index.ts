@@ -134,6 +134,7 @@ export interface IncidentMapPin {
   label: string;
   status: string;
   category: string;
+  createdAt?: string;
 }
 
 export interface CompareRoutesResponseDto {

@@ -88,6 +88,12 @@ enum AlertStatus {
   REMOVED
 }
 
+enum SosEventStatus {
+  ACTIVE
+  RESOLVED
+  CANCELLED
+}
+
 enum NotificationType {
   REPORT_STATUS
   REPORT_CONFIRMED
@@ -228,6 +234,7 @@ model User {
   idempotencyKeys     IdempotencyKey[]
   blocksMade          UserBlock[]            @relation("Blocker")
   blocksReceived      UserBlock[]            @relation("Blocked")
+  sosEvents           SosEvent[]
   uploads             Upload[]
   consents            Consent[]
 
@@ -595,20 +602,40 @@ model AlertVote {
 }
 
 model AlertSubscription {
-  userId       String          @id @map("user_id") @db.Uuid
-  enabled      Boolean         @default(false)
-  centerLat    Decimal?        @map("center_lat") @db.Decimal(9, 6)
-  centerLng    Decimal?        @map("center_lng") @db.Decimal(9, 6)
-  radiusKm     Int             @default(3) @map("radius_km") @db.SmallInt
-  categories   AlertCategory[] @default([])
-  emailEnabled Boolean         @default(true) @map("email_enabled")
-  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  userId         String          @id @map("user_id") @db.Uuid
+  enabled        Boolean         @default(false)
+  sosNearbyOptIn Boolean         @default(false) @map("sos_nearby_opt_in")
+  centerLat      Decimal?        @map("center_lat") @db.Decimal(9, 6)
+  centerLng      Decimal?        @map("center_lng") @db.Decimal(9, 6)
+  radiusKm       Int             @default(3) @map("radius_km") @db.SmallInt
+  categories     AlertCategory[] @default([])
+  emailEnabled   Boolean         @default(true) @map("email_enabled")
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([enabled, centerLat, centerLng])
   @@map("alert_subscriptions")
+}
+
+model SosEvent {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String         @map("user_id") @db.Uuid
+  latitude      Decimal        @db.Decimal(9, 6)
+  longitude     Decimal        @db.Decimal(9, 6)
+  radiusKm      Int            @default(3) @map("radius_km") @db.SmallInt
+  status        SosEventStatus @default(ACTIVE)
+  notifiedCount Int            @default(0) @map("notified_count")
+  resolvedAt    DateTime?      @map("resolved_at") @db.Timestamptz(6)
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("sos_events")
 }
 
 // ---------------------------------------------------------------- notifications, moderation

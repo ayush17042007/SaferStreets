@@ -21,6 +21,7 @@ export interface SafetyAlertInput {
   latitude: number;
   longitude: number;
   confirmCount: number;
+  disputeCount?: number;
   createdAt: Date;
 }
 
@@ -129,6 +130,7 @@ export function scoreRouteAlternatives(
           label: r.title,
           status: r.status,
           category: r.category,
+          createdAt: r.createdAt.toISOString(),
         });
       }
     }
@@ -145,7 +147,10 @@ export function scoreRouteAlternatives(
       const statusMult = a.status === "VERIFIED" ? 1.5 : 1.0;
       const ageHours = Math.max(0, (now.getTime() - a.createdAt.getTime()) / HOUR_MS);
       const freshness = Math.max(0.5, 1 - (ageHours / 6) * 0.5);
-      const confirmMult = 1 + Math.min(a.confirmCount, 5) * 0.1;
+      const confirmMult = Math.max(
+        0.6,
+        1 + Math.min(a.confirmCount, 5) * 0.1 - Math.min(a.disputeCount ?? 0, 5) * 0.08,
+      );
 
       penalty += base * statusMult * freshness * confirmMult;
       hazards.push({
@@ -166,6 +171,7 @@ export function scoreRouteAlternatives(
           label: a.description.slice(0, 80),
           status: a.status,
           category: a.category,
+          createdAt: a.createdAt.toISOString(),
         });
       }
     }
@@ -184,8 +190,10 @@ export function scoreRouteAlternatives(
     };
   });
 
-  // Pick highest safetyScore; tie-break by shortest duration.
-  const best = [...scored].sort((a, b) => b.safetyScore - a.safetyScore || a.durationS - b.durationS)[0];
+  // Pick highest safetyScore (lowest risk); tie-break by shorter distance, then duration.
+  const best = [...scored].sort(
+    (a, b) => b.safetyScore - a.safetyScore || a.distanceM - b.distanceM || a.durationS - b.durationS,
+  )[0];
   const recommendedRouteId = best?.id ?? scored[0]?.id ?? "";
 
   for (const r of scored) {

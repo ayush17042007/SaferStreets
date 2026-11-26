@@ -54,6 +54,8 @@ import { usersRoutes } from "./modules/users/users.routes.js";
 import type { JobPublisher } from "./jobs/publisher.js";
 import { createSettingsRepository } from "./modules/settings/settings.repository.js";
 import { createSettingsService, type SettingsService } from "./modules/settings/settings.service.js";
+import { createSosService } from "./modules/sos/sos.service.js";
+import { sosRoutes } from "./modules/sos/sos.routes.js";
 import { buildOpenApiDocument, createRegistry } from "./openapi/document.js";
 
 export const API_BASE = "/api/v1";
@@ -145,6 +147,8 @@ export function createApp(deps: AppDeps): AppBundle {
   mountRoutes(app, registry, API_BASE, dashboardRoutes(createDashboardService({ prisma, clock, settings })));
   const notifications = createNotificationService({ prisma, email, env });
   mountRoutes(app, registry, API_BASE, notificationsRoutes(notifications));
+  const sos = createSosService({ prisma, clock, notifications });
+  mountRoutes(app, registry, API_BASE, sosRoutes({ service: sos, prisma, clock, limiters }));
   const reports = createReportsService({ prisma, clock, settings, uploads, notifications });
   mountRoutes(app, registry, API_BASE, reportsRoutes({ service: reports, prisma, clock, limiters, routing: deps.routing ?? null }));
   mountRoutes(

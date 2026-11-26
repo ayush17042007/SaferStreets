@@ -55,3 +55,8 @@ export async function triggerJourneySos(
   });
   return res.data;
 }
+
+export async function confirmJourneySafety(id: string): Promise<JourneyDto> {
+  const res = await api<{ data: JourneyDto }>(`/journeys/${id}/confirm-safety`, { method: "POST" });
+  return res.data;
+}

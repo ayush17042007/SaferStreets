@@ -50,6 +50,7 @@ export function NewAlertForm() {
       }),
     onSuccess: (res) => {
       void qc.invalidateQueries({ queryKey: ["alerts"] });
+      void qc.invalidateQueries({ queryKey: ["saferoute"] });
       setFlash("Alert posted. It is shown as Unverified.");
       router.push(`/safealert/${res.data.id}`);
     },

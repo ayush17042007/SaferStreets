@@ -31,7 +31,7 @@ export function SosControl() {
           <div className="flex flex-col gap-0.5">
             <h2 className="type-h3 text-ink">SOS emergency alarm</h2>
             <p className="text-[13px] leading-5 text-coral-text">
-              Plays a continuous loud alarm on this device to alert people nearby. Does not call 112 or post an alert.
+              Sounds an alarm on this device and shares your GPS location with nearby opted-in SaferStreets users. Does not call 112.
             </p>
           </div>
         </div>
@@ -53,7 +53,7 @@ export function SosControl() {
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title="Activate SOS emergency alarm?"
-        description="This plays a continuous loud alarm sound on your device to alert people nearby. It does not call 112 or send a public SafeAlert."
+        description="This plays a loud alarm on your device and shares your current GPS location with nearby opted-in SaferStreets users. It does not call 112 or dispatch emergency services."
         confirmLabel="Activate SOS alarm"
         cancelLabel="Cancel"
         destructive

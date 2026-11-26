@@ -23,6 +23,25 @@ import { rateLimit, type RateLimiters } from "../../middleware/rateLimit.js";
 import type { RoutingClient } from "../geo/routing.client.js";
 import type { ReportsService, Viewer } from "./reports.service.js";
 import { scoreRouteAlternatives } from "./saferoute.scoring.js";
+type RoutingFailure = {
+  provider: string;
+  reason: string;
+  upstreamStatus?: number;
+  diagnosticSnippet?: string;
+  safeMessage: string;
+};
+
+function isRoutingFailure(error: unknown): error is RoutingFailure {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const value = error as Record<string, unknown>;
+
+  return (
+    typeof value.provider === "string" && typeof value.reason === "string" && typeof value.safeMessage === "string"
+  );
+}
 
 const anyBody = z.object({ data: z.unknown() });
 
@@ -180,8 +199,32 @@ export function reportsRoutes(deps: {
               { lat: body.originLat, lng: body.originLng },
               { lat: body.destLat, lng: body.destLng },
             );
-          } catch {
-            throw errors.serviceUnavailable("Could not reach the routing service just now. Try again in a moment.");
+          } catch (err) {
+            if (isRoutingFailure(err)) {
+              console.error("[SafeRoute] Routing request failed:", {
+                provider: err.provider,
+                reason: err.reason,
+                upstreamStatus: err.upstreamStatus,
+                snippet: err.diagnosticSnippet,
+              });
+
+              if (err.reason === "invalid_coordinates") {
+                throw errors.validation([], err.safeMessage);
+              }
+
+              if (err.reason === "not_found") {
+                throw errors.notFound(err.safeMessage);
+              }
+
+              if (err.reason === "rate_limited") {
+                throw errors.rateLimited(30);
+              }
+
+              throw errors.serviceUnavailable(err.safeMessage);
+            }
+
+            console.error("[SafeRoute] Unexpected routing error:", err);
+            throw errors.serviceUnavailable("Routing request failed.");
           }
           if (raw.length === 0) {
             throw errors.notFound("No routes found between those two locations.");
@@ -226,16 +269,23 @@ export function reportsRoutes(deps: {
                 latitude: true,
                 longitude: true,
                 confirmCount: true,
+                disputeCount: true,
                 createdAt: true,
               },
               take: 200,
             }),
           ]);
 
+          const isSignedIn = Boolean(req.auth);
           const scored = scoreRouteAlternatives(
             raw,
             reports.map((r) => ({ ...r, latitude: Number(r.latitude), longitude: Number(r.longitude) })),
-            alerts.map((a) => ({ ...a, latitude: Number(a.latitude), longitude: Number(a.longitude) })),
+            alerts.map((a) => ({
+              ...a,
+              description: isSignedIn ? a.description : a.category.replace(/_/g, " ").toLowerCase(),
+              latitude: Number(a.latitude),
+              longitude: Number(a.longitude),
+            })),
             now,
           );
           return { ...scored, provider: routing.provider };

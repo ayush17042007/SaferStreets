@@ -61,27 +61,37 @@ export interface JourneyContactEmail {
   /** Expected arrival, already formatted in India time. */
   eta: string;
   trackUrl: string;
+  lastLat?: number | null;
+  lastLng?: number | null;
+  lastLocationAt?: string | null;
+  condition?: string | null;
 }
 
-/** Emails to a trusted contact. Honest wording: no live location, no emergency service. */
+/** Emails to a trusted contact with last known GPS coordinates and map link when a safety condition occurs. */
 export function renderJourneyContactEmail(o: JourneyContactEmail): RenderedEmail {
   const who = o.userFirstName;
+  const locationLine =
+    o.lastLat != null && o.lastLng != null
+      ? `Last known GPS location${o.lastLocationAt ? ` (${o.lastLocationAt})` : ""}: ${o.lastLat.toFixed(5)}, ${o.lastLng.toFixed(5)} — Map: https://www.openstreetmap.org/?mlat=${o.lastLat}&mlon=${o.lastLng}#map=16/${o.lastLat}/${o.lastLng}`
+      : null;
   const copy = {
     start: {
       subject: `${who} added you as a trusted contact for a journey`,
       title: `${who} started a journey`,
       lines: [
-        `${who} is travelling to ${o.destination} and expects to arrive by ${o.eta}.`,
-        `You are getting this because ${who} chose you as a trusted contact. If ${who} has not marked the journey as finished well after that time, we will email you once more.`,
-        "SaferStreets does not track anyone's location. You can see only the expected arrival time and whether the journey is still open.",
+        `${who} is travelling to ${o.destination} with JourneyGuard protection.`,
+        `You are getting this because ${who} chose you as a trusted contact. You will only hear from us again if a safety condition occurs (route deviation, prolonged stop, lost signal, or SOS).`,
       ],
     },
     escalation: {
-      subject: `${who} has not confirmed arrival`,
-      title: `${who} has not confirmed arrival`,
+      subject: o.condition ? `Safety alert for ${who}` : `${who} has not confirmed arrival`,
+      title: o.condition ? `Safety check needed for ${who}` : `${who} has not confirmed arrival`,
       lines: [
-        `${who} expected to arrive at ${o.destination} by ${o.eta} and has not marked the journey as finished.`,
-        `Please try calling or messaging ${who} now. SaferStreets cannot see where ${who} is. If you think ${who} is in danger, call 112.`,
+        o.condition
+          ? `${who}'s journey to ${o.destination} triggered a safety alert (${o.condition}).`
+          : `${who} expected to arrive at ${o.destination} by ${o.eta} and has not marked the journey as finished.`,
+        ...(locationLine ? [locationLine] : []),
+        `Please try calling or messaging ${who} now. If you think ${who} is in danger, call 112.`,
         "You will not get another email about this journey.",
       ],
     },

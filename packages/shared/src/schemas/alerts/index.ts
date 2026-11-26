@@ -46,6 +46,7 @@ export const alertSubscriptionSchema = z
     /** Empty means every category. */
     categories: z.array(AlertCategory.schema).max(6),
     emailEnabled: z.boolean(),
+    sosNearbyOptIn: z.boolean().optional(),
   })
   .refine((v) => !v.enabled || (v.centerLat !== null && v.centerLng !== null), {
     message: "Choose the centre of your alert area.",

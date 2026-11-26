@@ -120,6 +120,7 @@ export function createJourneysService(deps: {
     j: Row,
     kind: "start" | "all-clear" | "escalation",
     userFullName: string | null,
+    condition?: string,
   ) {
     const c = await prisma.emergencyContact.findUnique({ where: { id: j.emergencyContactId ?? "" } });
     if (!c || c.unsubscribedAt) return;
@@ -132,6 +133,10 @@ export function createJourneysService(deps: {
         destination: j.destinationText,
         eta: j.expectedArrivalAt,
         journeyId: j.id,
+        lastLat: j.lastLat !== null ? Number(j.lastLat) : null,
+        lastLng: j.lastLng !== null ? Number(j.lastLng) : null,
+        lastLocationAt: j.lastLocationAt,
+        condition: condition ?? null,
       });
     } catch (err) {
       deps.log.error({ err, journeyId: j.id }, `could not queue the ${kind} email`);
@@ -140,15 +145,19 @@ export function createJourneysService(deps: {
 
   return {
     async start(userId: string, input: StartJourney): Promise<JourneyDto> {
-      const eta = new Date(input.expectedArrivalAt);
       const t = now().getTime();
-      if (eta.getTime() < t + MIN_ETA_MINUTES * MIN_MS) {
-        throw errors.validation([
-          { field: "expectedArrivalAt", message: "Pick an arrival time at least 5 minutes from now." },
-        ]);
-      }
-      if (eta.getTime() > t + MAX_ETA_HOURS * HOUR_MS) {
-        throw errors.validation([{ field: "expectedArrivalAt", message: "Pick an arrival time within 24 hours." }]);
+      const eta = input.expectedArrivalAt
+        ? new Date(input.expectedArrivalAt)
+        : new Date(t + MAX_ETA_HOURS * HOUR_MS);
+      if (input.expectedArrivalAt) {
+        if (eta.getTime() < t + MIN_ETA_MINUTES * MIN_MS) {
+          throw errors.validation([
+            { field: "expectedArrivalAt", message: "Pick an arrival time at least 5 minutes from now." },
+          ]);
+        }
+        if (eta.getTime() > t + MAX_ETA_HOURS * HOUR_MS) {
+          throw errors.validation([{ field: "expectedArrivalAt", message: "Pick an arrival time within 24 hours." }]);
+        }
       }
       const contact = await prisma.emergencyContact.findFirst({ where: { id: input.emergencyContactId, userId } });
       if (!contact) throw errors.notFound("We couldn't find that trusted contact.");
@@ -157,6 +166,7 @@ export function createJourneysService(deps: {
       }
       const id = randomUUID();
       const token = deriveTrackToken(deps.env.SESSION_SECRET, id);
+      const trackingEnabled = input.trackingEnabled ?? true;
       try {
         await prisma.$transaction(async (tx) => {
           await tx.journey.create({
@@ -170,9 +180,9 @@ export function createJourneysService(deps: {
               startText: input.startText ?? null,
               startLat: input.startLat ?? null,
               startLng: input.startLng ?? null,
-              trackingEnabled: input.trackingEnabled ?? false,
+              trackingEnabled,
               ...(input.routeGeometry ? { routeGeometry: input.routeGeometry } : {}),
-              ...(input.startLat !== undefined && input.startLng !== undefined && input.trackingEnabled
+              ...(input.startLat !== undefined && input.startLng !== undefined && trackingEnabled
                 ? { lastLat: input.startLat, lastLng: input.startLng, lastLocationAt: now() }
                 : {}),
               notes: input.notes ?? null,
@@ -319,11 +329,21 @@ export function createJourneysService(deps: {
           },
         });
 
-        let nextSafetyState = j.safetyState;
+        let nextSafetyState = j.safetyState === "LOST_SIGNAL" ? "NORMAL" : j.safetyState;
+        const poorAccuracy = input.accuracyM !== undefined && input.accuracyM > 150;
+        const nearDestination =
+          j.destLat !== null &&
+          j.destLng !== null &&
+          haversineKm(
+            { lat: input.latitude, lng: input.longitude },
+            { lat: Number(j.destLat), lng: Number(j.destLng) },
+          ) *
+            1000 <=
+            100;
 
-        // 1. Route deviation check (> 250 m from planned route polyline)
+        // 1. Route deviation check (> 250 m from planned route polyline, only with reliable GPS accuracy)
         const geom = (j.routeGeometry as Array<[number, number]> | null) ?? null;
-        if (geom && geom.length >= 2) {
+        if (!poorAccuracy && geom && geom.length >= 2) {
           const distM = distanceToPolylineM(input.latitude, input.longitude, geom);
           if (distM > 250) {
             const already = await tx.journeyEvent.findFirst({ where: { journeyId: id, type: "DEVIATED" } });
@@ -337,32 +357,34 @@ export function createJourneysService(deps: {
           }
         }
 
-        // 2. Prolonged unexpected stoppage (>= 5 min within 30 m)
-        const fiveMinAgo = new Date(recordedAt.getTime() - 5 * MIN_MS);
-        const recent = await tx.journeyLocation.findMany({
-          where: { journeyId: id, recordedAt: { gte: new Date(recordedAt.getTime() - 10 * MIN_MS) } },
-          orderBy: { recordedAt: "asc" },
-          take: 50,
-        });
-        const oldest = recent[0];
-        if (oldest && oldest.recordedAt.getTime() <= fiveMinAgo.getTime()) {
-          const maxMoveM = Math.max(
-            ...recent.map(
-              (p) =>
-                haversineKm(
-                  { lat: input.latitude, lng: input.longitude },
-                  { lat: Number(p.latitude), lng: Number(p.longitude) },
-                ) * 1000,
-            ),
-          );
-          if (maxMoveM <= 30) {
-            const already = await tx.journeyEvent.findFirst({ where: { journeyId: id, type: "STOPPED" } });
-            if (!already) {
-              await tx.journeyEvent.create({
-                data: { journeyId: id, type: "STOPPED", meta: { maxMoveM: Math.round(maxMoveM) } },
-              });
-              if (nextSafetyState === "NORMAL") nextSafetyState = "STOPPED";
-              if (!notifyCondition) notifyCondition = "stopped";
+        // 2. Prolonged unexpected stoppage (>= 5 min within 30 m), excluding destination arrival & poor accuracy
+        if (!poorAccuracy && !nearDestination) {
+          const fiveMinAgo = new Date(recordedAt.getTime() - 5 * MIN_MS);
+          const recent = await tx.journeyLocation.findMany({
+            where: { journeyId: id, recordedAt: { gte: new Date(recordedAt.getTime() - 10 * MIN_MS) } },
+            orderBy: { recordedAt: "asc" },
+            take: 50,
+          });
+          const oldest = recent[0];
+          if (oldest && oldest.recordedAt.getTime() <= fiveMinAgo.getTime()) {
+            const maxMoveM = Math.max(
+              ...recent.map(
+                (p) =>
+                  haversineKm(
+                    { lat: input.latitude, lng: input.longitude },
+                    { lat: Number(p.latitude), lng: Number(p.longitude) },
+                  ) * 1000,
+              ),
+            );
+            if (maxMoveM <= 30) {
+              const already = await tx.journeyEvent.findFirst({ where: { journeyId: id, type: "STOPPED" } });
+              if (!already) {
+                await tx.journeyEvent.create({
+                  data: { journeyId: id, type: "STOPPED", meta: { maxMoveM: Math.round(maxMoveM) } },
+                });
+                if (nextSafetyState === "NORMAL") nextSafetyState = "STOPPED";
+                if (!notifyCondition) notifyCondition = "stopped";
+              }
             }
           }
         }
@@ -381,9 +403,26 @@ export function createJourneysService(deps: {
       const updated = await own(userId, id);
       if (notifyCondition) {
         const u = await prisma.user.findUnique({ where: { id: userId }, select: { fullName: true } });
-        await bestEffortContactEmail(updated, "escalation", u?.fullName ?? null);
+        await bestEffortContactEmail(
+          updated,
+          "escalation",
+          u?.fullName ?? null,
+          notifyCondition === "deviated" ? "route deviation (>250 m)" : "extended unexpected stop",
+        );
       }
       return toDto(updated);
+    },
+
+    async confirmSafety(userId: string, id: string): Promise<JourneyDto> {
+      const existing = await own(userId, id);
+      if (existing.status !== "ACTIVE" && existing.status !== "OVERDUE") {
+        throw errors.conflict("This journey has already ended.");
+      }
+      await prisma.journey.update({
+        where: { id },
+        data: { safetyState: "NORMAL", sosTriggeredAt: null },
+      });
+      return toDto(await own(userId, id));
     },
 
     async triggerSos(
@@ -424,7 +463,7 @@ export function createJourneysService(deps: {
       const updated = await own(userId, id);
       if (shouldNotify) {
         const u = await prisma.user.findUnique({ where: { id: userId }, select: { fullName: true } });
-        await bestEffortContactEmail(updated, "escalation", u?.fullName ?? null);
+        await bestEffortContactEmail(updated, "escalation", u?.fullName ?? null, "manual SOS triggered");
       }
       return { ok: true, emergencyNumber: "112", journey: await toDto(updated) };
     },

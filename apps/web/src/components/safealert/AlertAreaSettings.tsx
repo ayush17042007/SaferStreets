@@ -38,6 +38,7 @@ function Form({ initial }: { initial: AlertSubscriptionDto }) {
   const [radius, setRadius] = useState(initial.radiusKm);
   const [categories, setCategories] = useState<AlertCategory[]>(initial.categories);
   const [emailEnabled, setEmailEnabled] = useState(initial.emailEnabled);
+  const [sosNearbyOptIn, setSosNearbyOptIn] = useState(initial.sosNearbyOptIn ?? false);
   const [error, setError] = useState<string | null>(null);
 
   const save = useMutation({
@@ -46,6 +47,7 @@ function Form({ initial }: { initial: AlertSubscriptionDto }) {
         method: "PUT",
         body: {
           enabled,
+          sosNearbyOptIn,
           centerLat: center?.lat ?? null,
           centerLng: center?.lng ?? null,
           radiusKm: radius,
@@ -144,6 +146,13 @@ function Form({ initial }: { initial: AlertSubscriptionDto }) {
           onCheckedChange={setEmailEnabled}
           label="Email me about alerts"
           description="Push notifications are not available."
+        />
+
+        <Switch
+          checked={sosNearbyOptIn}
+          onCheckedChange={setSosNearbyOptIn}
+          label="Receive nearby SOS alerts"
+          description="Get in-app and email alerts when someone triggers SOS near your alert area."
         />
       </div>
 

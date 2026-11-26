@@ -3,7 +3,8 @@
 import type { AlertCategory, AlertDto } from "@saferstreets/shared";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 import {
   Button,
   EmptyState,
@@ -17,6 +18,8 @@ import {
 } from "@/components/ui";
 import { api } from "@/lib/api";
 import { ALERT_CATEGORY_META, ALERT_CATEGORY_ORDER, expiresIn, timeAgo } from "@/lib/safealert";
+import { MapView } from "@/map/MapView";
+import type { MapPoint } from "@/map/markers";
 import { EmergencyBanner } from "./Call112";
 
 interface ListResponse {
@@ -42,8 +45,21 @@ function useAlertFeed(category: AlertCategory | null) {
 
 /** M4 feed: community-reported, Unverified alerts. Guests see a limited card with no description. */
 export function AlertsFeed({ signedIn }: { signedIn: boolean }) {
+  const router = useRouter();
   const [category, setCategory] = useState<AlertCategory | null>(null);
+  const [showMap, setShowMap] = useState(true);
   const q = useAlertFeed(category);
+  const mapPoints = useMemo<MapPoint[]>(
+    () =>
+      q.alerts.map((a) => ({
+        id: a.id,
+        kind: "alert",
+        lat: a.latitude,
+        lng: a.longitude,
+        label: ALERT_CATEGORY_META[a.category].label,
+      })),
+    [q.alerts],
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -68,17 +84,32 @@ export function AlertsFeed({ signedIn }: { signedIn: boolean }) {
 
       <EmergencyBanner text="SafeAlert is community-reported and Unverified. In an emergency call 112." />
 
-      <div role="group" aria-label="Filter by category" className="flex flex-wrap gap-2">
-        <FilterChip label="All" selected={category === null} onClick={() => setCategory(null)} />
-        {ALERT_CATEGORY_ORDER.map((c) => (
-          <FilterChip
-            key={c}
-            label={ALERT_CATEGORY_META[c].label}
-            selected={category === c}
-            onClick={() => setCategory(category === c ? null : c)}
-          />
-        ))}
+      <div role="group" aria-label="Filter by category" className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-2">
+          <FilterChip label="All" selected={category === null} onClick={() => setCategory(null)} />
+          {ALERT_CATEGORY_ORDER.map((c) => (
+            <FilterChip
+              key={c}
+              label={ALERT_CATEGORY_META[c].label}
+              selected={category === c}
+              onClick={() => setCategory(category === c ? null : c)}
+            />
+          ))}
+        </div>
+        {q.alerts.length > 0 ? (
+          <Button type="button" variant="secondary" size="mobile" onClick={() => setShowMap((v) => !v)}>
+            {showMap ? "Hide map" : "Show map"}
+          </Button>
+        ) : null}
       </div>
+
+      {showMap && q.alerts.length > 0 ? (
+        <MapView
+          points={mapPoints}
+          onSelect={(id) => router.push(`/safealert/${id}`)}
+          label="Active SafeAlerts map"
+        />
+      ) : null}
 
       {q.isPending ? (
         <div className="grid gap-3 md:grid-cols-2" aria-busy="true">

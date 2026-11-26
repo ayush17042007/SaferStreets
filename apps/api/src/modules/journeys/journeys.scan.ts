@@ -30,10 +30,10 @@ export async function runJourneyScan(deps: ScanDeps): Promise<{ overdue: number;
     where: {
       status: { in: ["ACTIVE", "OVERDUE"] },
       OR: [
-        { expectedArrivalAt: { lte: new Date(now.getTime() - OVERDUE_AFTER_MINUTES * MIN_MS) } },
+        { trackingEnabled: false, expectedArrivalAt: { lte: new Date(now.getTime() - OVERDUE_AFTER_MINUTES * MIN_MS) } },
         {
           trackingEnabled: true,
-          safetyState: "NORMAL",
+          safetyState: { in: ["NORMAL", "LOST_SIGNAL"] },
           OR: [{ lastLocationAt: { lte: fiveMinAgo } }, { lastLocationAt: null, startedAt: { lte: fiveMinAgo } }],
         },
       ],
@@ -74,7 +74,8 @@ async function processOne(deps: ScanDeps, id: string, now: Date) {
     const eta = j.expectedArrivalAt.getTime();
     let status = j.status;
 
-    if (status === "ACTIVE" && now.getTime() >= eta + OVERDUE_AFTER_MINUTES * MIN_MS) {
+    // Legacy non-tracking ETA overdue check (only when trackingEnabled is false).
+    if (!j.trackingEnabled && status === "ACTIVE" && now.getTime() >= eta + OVERDUE_AFTER_MINUTES * MIN_MS) {
       await tx.journey.update({ where: { id }, data: { status: "OVERDUE", overdueAt: now } });
       await tx.journeyEvent.create({ data: { journeyId: id, type: "REMINDER_SENT", meta: {} } });
       const { flush } = await deps.notifications.create(tx, {
@@ -92,7 +93,8 @@ async function processOne(deps: ScanDeps, id: string, now: Date) {
 
     // Check loss of live location updates (> 5 min stale while trackingEnabled).
     const lastSignal = j.lastLocationAt ?? j.startedAt;
-    if (j.trackingEnabled && j.safetyState === "NORMAL" && now.getTime() - lastSignal.getTime() >= 5 * MIN_MS) {
+    const lostMs = now.getTime() - lastSignal.getTime();
+    if (j.trackingEnabled && j.safetyState === "NORMAL" && lostMs >= 5 * MIN_MS) {
       const alreadyLost = await tx.journeyEvent.findFirst({ where: { journeyId: id, type: "LOST_SIGNAL" } });
       if (!alreadyLost) {
         await tx.journey.update({ where: { id }, data: { safetyState: "LOST_SIGNAL" } });
@@ -111,7 +113,11 @@ async function processOne(deps: ScanDeps, id: string, now: Date) {
       }
     }
 
-    if (status === "OVERDUE" && j.contactNotifiedAt === null && now.getTime() >= eta + j.escalationMinutes * MIN_MS) {
+    const shouldEscalate = j.trackingEnabled
+      ? j.safetyState === "LOST_SIGNAL" && j.contactNotifiedAt === null && lostMs >= 10 * MIN_MS
+      : status === "OVERDUE" && j.contactNotifiedAt === null && now.getTime() >= eta + j.escalationMinutes * MIN_MS;
+
+    if (shouldEscalate) {
       const contact = j.emergencyContact;
       await tx.journey.update({ where: { id }, data: { contactNotifiedAt: now } });
       contactNotified = true;
@@ -143,6 +149,10 @@ async function processOne(deps: ScanDeps, id: string, now: Date) {
               destination: j.destinationText,
               eta: j.expectedArrivalAt,
               journeyId: id,
+              lastLat: j.lastLat !== null ? Number(j.lastLat) : null,
+              lastLng: j.lastLng !== null ? Number(j.lastLng) : null,
+              lastLocationAt: j.lastLocationAt,
+              condition: j.trackingEnabled ? "GPS signal lost (>10 min)" : null,
             });
             await prisma.journeyEvent.update({
               where: { id: ev.id },

@@ -327,6 +327,7 @@ export function createAlertsService(deps: {
       const reason = await postingBlock(userId);
       return {
         enabled: s?.enabled ?? false,
+        sosNearbyOptIn: s?.sosNearbyOptIn ?? false,
         centerLat: s?.centerLat ? num(s.centerLat) : null,
         centerLng: s?.centerLng ? num(s.centerLng) : null,
         radiusKm: s?.radiusKm ?? 3,
@@ -340,6 +341,7 @@ export function createAlertsService(deps: {
     async putSubscription(userId: string, input: AlertSubscriptionInput): Promise<AlertSubscriptionDto> {
       const data = {
         enabled: input.enabled,
+        ...(input.sosNearbyOptIn !== undefined ? { sosNearbyOptIn: input.sosNearbyOptIn } : {}),
         centerLat: input.centerLat,
         centerLng: input.centerLng,
         radiusKm: input.radiusKm,

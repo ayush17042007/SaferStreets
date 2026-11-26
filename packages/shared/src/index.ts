@@ -13,4 +13,5 @@ export * from "./schemas/admin/index.js";
 export * from "./schemas/uploads/index.js";
 export * from "./schemas/health/index.js";
 export * from "./schemas/public/index.js";
+export * from "./schemas/sos/index.js";
 export * from "./geo.js";

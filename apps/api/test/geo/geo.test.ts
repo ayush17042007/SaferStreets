@@ -110,21 +110,67 @@ describe("GET /geo/search and /geo/reverse", () => {
 });
 
 describe("MapTiler client", () => {
-  it("is off without a key and never puts the key anywhere but the upstream request", async () => {
+  it("parses current MapTiler POI response and keeps coordinates", async () => {
     expect(createMapTilerClient(undefined)).toBeNull();
+
     const urls: string[] = [];
-    const client = createMapTilerClient("k123", (async (u: URL) => {
-      urls.push(String(u));
-      return new Response(JSON.stringify({ features: [{ place_name: "Gate 2, Kota", center: [75.834, 25.1425] }] }), {
-        status: 200,
-      });
+
+    const responses = [
+      {
+        features: [
+          {
+            properties: {
+              place: "Seven Wonders Park, Rajasthan, India",
+              text: "Seven Wonders Park",
+              place_type: "poi",
+            },
+            geometry: {
+              type: "Point",
+              coordinates: [75.8486905, 25.1799241],
+            },
+          },
+        ],
+      },
+      {
+        features: [
+          {
+            properties: {
+              place_name: "Main Road, Kota, Rajasthan, India",
+            },
+            geometry: {
+              type: "Point",
+              coordinates: [75.83, 25.14],
+            },
+          },
+        ],
+      },
+    ];
+
+    const client = createMapTilerClient("test-key", (async (input: URL) => {
+      urls.push(String(input));
+
+      return new Response(JSON.stringify(responses.shift()), { status: 200 });
     }) as unknown as typeof fetch)!;
-    const places = await client.search("gate", DEFAULT_REGION);
-    expect(places).toEqual([{ label: "Gate 2, Kota", lat: 25.1425, lng: 75.834 }]);
-    expect(urls[0]).toContain("api.maptiler.com/geocoding/gate.json");
-    expect(urls[0]).toContain("proximity=75.85%2C25.15");
-    expect(await client.reverse(25.14, 75.83)).toBe("Gate 2, Kota");
-    expect(urls[1]).toContain("/geocoding/75.83,25.14.json");
+
+    const places = await client.search("Seven Wonders Park Kota", DEFAULT_REGION);
+
+    expect(places).toEqual([
+      {
+        label: "Seven Wonders Park, Rajasthan, India",
+        lat: 25.1799241,
+        lng: 75.8486905,
+      },
+    ]);
+
+    const searchUrl = new URL(urls[0]!);
+
+    expect(searchUrl.searchParams.get("types")).toContain("poi");
+    expect(searchUrl.searchParams.get("autocomplete")).toBe("true");
+    expect(searchUrl.searchParams.get("country")).toBe("in");
+
+    const address = await client.reverse(25.14, 75.83);
+
+    expect(address).toBe("Main Road, Kota, Rajasthan, India");
   });
 });
 

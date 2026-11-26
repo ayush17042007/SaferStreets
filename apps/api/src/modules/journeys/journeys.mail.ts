@@ -39,6 +39,10 @@ export async function queueContactEmail(
     destination: string;
     eta: Date;
     journeyId: string;
+    lastLat?: number | null;
+    lastLng?: number | null;
+    lastLocationAt?: Date | null;
+    condition?: string | null;
   },
 ): Promise<string> {
   const rendered = renderJourneyContactEmail({
@@ -48,6 +52,10 @@ export async function queueContactEmail(
     destination: args.destination,
     eta: formatIst(args.eta),
     trackUrl: trackUrl(env, args.journeyId),
+    lastLat: args.lastLat ?? null,
+    lastLng: args.lastLng ?? null,
+    lastLocationAt: args.lastLocationAt ? formatIst(args.lastLocationAt) : null,
+    condition: args.condition ?? null,
   });
   return email.enqueue(args.to, `journey-${args.kind}`, rendered);
 }

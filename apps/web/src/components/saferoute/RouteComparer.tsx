@@ -1,6 +1,8 @@
 "use client";
 
-import type { CompareRoutesResponseDto, RouteAlternativeDto } from "@saferstreets/shared";
+import type { CompareRoutesResponseDto, IncidentMapPin, RouteAlternativeDto } from "@saferstreets/shared";
+import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Banner, Button, Card, Icon, StatusChip, TextField, cn } from "@/components/ui";
@@ -26,7 +28,7 @@ function PlaceSearchField({
   label: string;
   placeholder: string;
   value: Place | null;
-  onSelect: (p: Place) => void;
+  onSelect: (p: Place | null) => void;
   extraAction?: React.ReactNode;
 }) {
   const [typed, setTyped] = useState<string | null>(null);
@@ -69,14 +71,20 @@ function PlaceSearchField({
             label={label}
             placeholder={placeholder}
             value={query}
-            onChange={(e) => setTyped(e.target.value)}
+            onChange={(e) => {
+              setTyped(e.target.value);
+              onSelect(null);
+            }}
           />
         </div>
         {extraAction}
       </div>
       {searchError ? <p className="text-[12px] leading-4 text-text-secondary">{searchError}</p> : null}
       {results.length > 0 ? (
-        <ul className="flex flex-col gap-1 rounded-control border border-line bg-card p-1" aria-label={`${label} results`}>
+        <ul
+          className="flex flex-col gap-1 rounded-control border border-line bg-card p-1"
+          aria-label={`${label} results`}
+        >
           {results.slice(0, 5).map((r) => (
             <li key={`${r.lat},${r.lng},${r.label}`}>
               <button
@@ -122,10 +130,40 @@ export function RouteComparer() {
   const [origin, setOrigin] = useState<Place | null>(null);
   const [dest, setDest] = useState<Place | null>(null);
   const [gpsStatus, setGpsStatus] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<CompareRoutesResponseDto | null>(null);
+  const [submitted, setSubmitted] = useState<{
+    originLat: number;
+    originLng: number;
+    destLat: number;
+    destLng: number;
+  } | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
+
+  const routesQuery = useQuery({
+    queryKey: ["saferoute", submitted],
+    queryFn: () => compareRoutes(submitted!),
+    enabled: Boolean(submitted),
+    retry: false,
+  });
+
+  const result = routesQuery.data ?? null;
+  const loading = routesQuery.isFetching;
+  const error =
+    validationError ??
+    (routesQuery.isError
+      ? routesQuery.error instanceof ApiError
+        ? routesQuery.error.message
+        : "We could not compare routes right now. Try again."
+      : null);
+
+  useEffect(() => {
+    if (result?.recommendedRouteId) {
+      setSelectedRouteId((prev) =>
+        prev && result.routes.some((r) => r.id === prev) ? prev : result.recommendedRouteId,
+      );
+    }
+  }, [result]);
 
   function useCurrentLocation() {
     if (!("geolocation" in navigator)) {
@@ -155,27 +193,25 @@ export function RouteComparer() {
 
   async function findRoutes() {
     if (!origin || !dest) {
-      setError("Choose both a starting point and a destination.");
+      setValidationError("Choose both a starting point and a destination.");
       return;
     }
-    setError(null);
-    setLoading(true);
-    try {
-      const data = await compareRoutes({
-        originLat: origin.lat,
-        originLng: origin.lng,
-        destLat: dest.lat,
-        destLng: dest.lng,
-      });
-      setResult(data);
-      setSelectedRouteId(data.recommendedRouteId);
-    } catch (e) {
-      setResult(null);
-      if (e instanceof ApiError) setError(e.message);
-      else setError("We could not compare routes right now. Try again.");
-    } finally {
-      setLoading(false);
-    }
+    setValidationError(null);
+    setSelectedPinId(null);
+    const next = {
+      originLat: origin.lat,
+      originLng: origin.lng,
+      destLat: dest.lat,
+      destLng: dest.lng,
+    };
+    const same =
+      submitted &&
+      submitted.originLat === next.originLat &&
+      submitted.originLng === next.originLng &&
+      submitted.destLat === next.destLat &&
+      submitted.destLng === next.destLng;
+    setSubmitted(next);
+    if (same) await routesQuery.refetch();
   }
 
   function startJourneyWithRoute(route: RouteAlternativeDto) {
@@ -203,11 +239,7 @@ export function RouteComparer() {
       return {
         id: r.id,
         coordinates: r.coordinates,
-        color: isSelected
-          ? isRec
-            ? lightColors.mint
-            : lightColors.ink
-          : lightColors["text-muted"],
+        color: isSelected ? (isRec ? lightColors.mint : lightColors.ink) : lightColors["text-muted"],
         selected: isSelected,
       };
     });
@@ -233,6 +265,7 @@ export function RouteComparer() {
   }, [origin, dest, result]);
 
   const activeRoute = result?.routes.find((r) => r.id === selectedRouteId) ?? result?.routes[0] ?? null;
+  const selectedPin: IncidentMapPin | null = result?.incidentPins.find((p) => p.id === selectedPinId) ?? null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -257,12 +290,7 @@ export function RouteComparer() {
         />
         {gpsStatus ? <p className="text-[12px] leading-4 text-text-secondary">{gpsStatus}</p> : null}
 
-        <PlaceSearchField
-          label="Destination"
-          placeholder="Where are you going?"
-          value={dest}
-          onSelect={setDest}
-        />
+        <PlaceSearchField label="Destination" placeholder="Where are you going?" value={dest} onSelect={setDest} />
 
         {error ? (
           <Banner tone="coral" icon="error">
@@ -316,7 +344,9 @@ export function RouteComparer() {
                           <span>·</span>
                           <span>{formatDuration(r.durationS)}</span>
                           <span>·</span>
-                          <span>{r.incidentCount} nearby {r.incidentCount === 1 ? "issue" : "issues"}</span>
+                          <span>
+                            {r.incidentCount} nearby {r.incidentCount === 1 ? "issue" : "issues"}
+                          </span>
                         </div>
 
                         <p className="text-[13px] leading-5 text-ink">{r.explanation}</p>
@@ -344,12 +374,7 @@ export function RouteComparer() {
                           >
                             {isSel ? "Selected" : "Preview on map"}
                           </Button>
-                          <Button
-                            type="button"
-                            size="mobile"
-                            variant="amber"
-                            onClick={() => startJourneyWithRoute(r)}
-                          >
+                          <Button type="button" size="mobile" variant="amber" onClick={() => startJourneyWithRoute(r)}>
                             Start protected journey
                           </Button>
                         </div>
@@ -370,12 +395,52 @@ export function RouteComparer() {
           )}
         </div>
 
-        <div className="md:sticky md:top-20 md:self-start">
+        <div className="flex flex-col gap-3 md:sticky md:top-20 md:self-start">
           <MapView
             points={mapPoints}
             routes={mapRoutes}
+            selectedId={selectedPinId}
+            onSelect={setSelectedPinId}
             label={activeRoute ? `Map showing ${activeRoute.summary}` : "Route comparison map"}
           />
+          {selectedPin ? (
+            <Card className="flex flex-col gap-2" aria-label="Selected incident details">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <StatusChip
+                    tone={selectedPin.kind === "alert" ? "coral" : "amber"}
+                    label={selectedPin.kind === "alert" ? "SafeAlert" : "Safety Report"}
+                  />
+                  <StatusChip tone="neutral" label={selectedPin.status.replace(/_/g, " ")} />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPinId(null)}
+                  className="text-[12px] font-medium text-text-secondary hover:text-ink"
+                >
+                  Close
+                </button>
+              </div>
+              <p className="text-[14px] font-semibold text-ink">{selectedPin.category.replace(/_/g, " ")}</p>
+              <p className="text-[13px] leading-5 text-ink">{selectedPin.label}</p>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-text-secondary">
+                <span>
+                  {selectedPin.lat.toFixed(4)}, {selectedPin.lng.toFixed(4)}
+                  {selectedPin.createdAt ? ` · ${new Date(selectedPin.createdAt).toLocaleString("en-IN")}` : ""}
+                </span>
+                <Link
+                  href={
+                    selectedPin.kind === "alert"
+                      ? `/safealert/${selectedPin.id}`
+                      : `/saferoute/reports/${selectedPin.id}`
+                  }
+                  className="font-semibold text-ink underline decoration-amber decoration-2 underline-offset-[3px]"
+                >
+                  View details
+                </Link>
+              </div>
+            </Card>
+          ) : null}
         </div>
       </div>
     </div>

@@ -4,10 +4,10 @@ import type { JourneyDto, JourneySafetyState } from "@saferstreets/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSos } from "@/components/sos/SosProvider";
-import { Banner, Button, Card, ConfirmDialog, CountdownRing, Icon, Modal, StatusChip, useToast } from "@/components/ui";
+import { Banner, Button, Card, ConfirmDialog, Icon, StatusChip, useToast } from "@/components/ui";
 import { lightColors } from "@/design/tokens";
 import { ApiError, api } from "@/lib/api";
-import { formatClock, formatDateTime, recordJourneyLocation, triggerJourneySos } from "@/lib/journeyguard";
+import { confirmJourneySafety, formatClock, formatDateTime, recordJourneyLocation, triggerJourneySos } from "@/lib/journeyguard";
 import { MapView, type MapRoute } from "@/map/MapView";
 import type { MapPoint } from "@/map/markers";
 import { ACTIVE_KEY, useContacts } from "./hooks";
@@ -47,7 +47,6 @@ export function JourneyPanel({ journey: j }: { journey: JourneyDto }) {
   const sosCtx = useSos();
   const now = useNow();
   const contacts = useContacts();
-  const [extendOpen, setExtendOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [gpsState, setGpsState] = useState<"idle" | "watching" | "denied" | "unavailable" | "offline">("idle");
@@ -66,7 +65,7 @@ export function JourneyPanel({ journey: j }: { journey: JourneyDto }) {
         }
         setGpsState("watching");
         const ts = Date.now();
-        if (ts - lastSentRef.current < 30_000) return;
+        if (ts - lastSentRef.current < 15_000) return;
         lastSentRef.current = ts;
         void recordJourneyLocation(j.id, {
           latitude: pos.coords.latitude,
@@ -90,14 +89,9 @@ export function JourneyPanel({ journey: j }: { journey: JourneyDto }) {
       navigator.geolocation.clearWatch(watchId);
     };
   }, [live, j.id, j.trackingEnabled, qc]);
-  const overdue = j.status === "OVERDUE";
   const name = j.contact?.name ?? "your contact";
   const phone = j.contact ? contacts.data?.find((c) => c.id === j.contact!.id)?.phone : null;
   const emailFailed = j.contactEmailFailed || j.contactOptedOut;
-
-  const eta = new Date(j.expectedArrivalAt).getTime();
-  const minutesLeft = Math.max(0, Math.ceil((eta - now) / 60_000));
-  const totalMinutes = Math.max(1, Math.round((eta - new Date(j.startedAt).getTime()) / 60_000));
 
   const done = async (message: string) => {
     await qc.invalidateQueries({ queryKey: ["journey"] });
@@ -106,7 +100,6 @@ export function JourneyPanel({ journey: j }: { journey: JourneyDto }) {
   };
   const fail = (err: unknown) => {
     setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
-    setExtendOpen(false);
     setCancelOpen(false);
     void qc.invalidateQueries({ queryKey: ACTIVE_KEY });
   };
@@ -124,11 +117,12 @@ export function JourneyPanel({ journey: j }: { journey: JourneyDto }) {
     },
     onError: fail,
   });
-  const extend = useMutation({
-    mutationFn: (minutes: 15 | 30) => api(`/journeys/${j.id}/extend`, { method: "POST", body: { minutes } }),
-    onSuccess: (_r, minutes) => {
-      setExtendOpen(false);
-      return done(`Arrival time moved ${minutes} minutes later.`);
+  const confirmSafe = useMutation({
+    mutationFn: () => confirmJourneySafety(j.id),
+    onSuccess: (updated) => {
+      qc.setQueryData(ACTIVE_KEY, updated);
+      if (sosCtx.active) sosCtx.stop();
+      toast.show("Safety confirmed. Live monitoring resumed.");
     },
     onError: fail,
   });
@@ -159,24 +153,11 @@ export function JourneyPanel({ journey: j }: { journey: JourneyDto }) {
     return [{ id: "planned", coordinates: j.routeGeometry, color: lightColors.ink, selected: true }];
   }, [j.routeGeometry]);
 
-  const extendBlock = j.contactNotifiedAt
-    ? `${name} has already been emailed, so the time can't be moved.`
-    : j.extensionsLeft <= 0
-      ? "You've used both extensions for this journey."
-      : null;
-
   return (
     <div className="flex flex-col gap-4">
       {error ? (
         <Banner tone="coral" icon="error">
           {error}
-        </Banner>
-      ) : null}
-
-      {overdue ? (
-        <Banner tone="amber-warn" icon="clock" title="Have you arrived?">
-          Your expected arrival time has passed. Confirm below once you are safe.
-          {j.contactNotifiedAt && !emailFailed ? <p className="mt-1 font-medium">We emailed {name}.</p> : null}
         </Banner>
       ) : null}
 
@@ -192,6 +173,17 @@ export function JourneyPanel({ journey: j }: { journey: JourneyDto }) {
                 : j.safetyState === "STOPPED"
                   ? "Extended stop detected"
                   : "Location updates paused"
+          }
+          action={
+            <Button
+              type="button"
+              variant="secondary"
+              size="mobile"
+              loading={confirmSafe.isPending}
+              onClick={() => confirmSafe.mutate()}
+            >
+              I&apos;m safe
+            </Button>
           }
         >
           {j.safetyState === "SOS"
@@ -221,31 +213,27 @@ export function JourneyPanel({ journey: j }: { journey: JourneyDto }) {
         </Banner>
       ) : null}
 
-      <Card border={overdue ? "amber-warn-border" : "periwinkle-border"} className="flex flex-col gap-5">
+      <Card border="periwinkle-border" className="flex flex-col gap-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <JourneyStatusChip status={j.status} />
             {live && j.trackingEnabled ? <SafetyStateChip state={j.safetyState} /> : null}
           </div>
           <span className="text-[12px] leading-4 text-text-secondary">
-            Arrive by {formatClock(j.expectedArrivalAt, now)}
+            Started {formatClock(j.startedAt, now)}
           </span>
         </div>
 
-        <div className="flex flex-col items-center gap-4 md:flex-row md:items-center md:gap-6">
-          {live ? (
-            <CountdownRing minutesLeft={minutesLeft} totalMinutes={totalMinutes} overdue={overdue} size={140} />
-          ) : null}
-          <div className="min-w-0 flex-1 text-center md:text-left">
-            <h2 className="type-h2 break-words">
-              {j.startText ? `${j.startText} to ${j.destinationText}` : `To ${j.destinationText}`}
-            </h2>
-            <p className="text-[14px] leading-5 text-text-secondary">
-              Expected {formatDateTime(j.expectedArrivalAt)} IST
-              {j.extensionsUsed > 0 ? ` · extended ${j.extensionsUsed} time${j.extensionsUsed === 1 ? "" : "s"}` : ""}
-            </p>
-            {j.notes ? <p className="mt-1 text-[14px] leading-5">{j.notes}</p> : null}
-          </div>
+        <div className="min-w-0">
+          <h2 className="type-h2 break-words">
+            {j.startText ? `${j.startText} to ${j.destinationText}` : `To ${j.destinationText}`}
+          </h2>
+          <p className="text-[14px] leading-5 text-text-secondary">
+            {j.lastLocationAt
+              ? `Last GPS fix: ${formatDateTime(j.lastLocationAt)} IST`
+              : "Waiting for first GPS location update..."}
+          </p>
+          {j.notes ? <p className="mt-1 text-[14px] leading-5">{j.notes}</p> : null}
         </div>
 
         <div className="flex items-center gap-3 rounded-control border border-line p-3">
@@ -265,14 +253,20 @@ export function JourneyPanel({ journey: j }: { journey: JourneyDto }) {
           <p className="text-[14px] leading-5 text-text-secondary" data-testid="honest-limits">
             {j.trackingEnabled ? (
               <>
-                Live GPS tracking is active while this tab stays open ({gpsState === "watching" ? "sending updates" : gpsState === "denied" ? "GPS permission denied" : gpsState === "offline" ? "offline — will retry" : gpsState === "unavailable" ? "GPS unavailable" : "initializing"}). If you haven&apos;t confirmed by{" "}
-                {formatClock(j.overdueAfterAt, now)}, we remind you. Closing the browser or locking your screen pauses web GPS.
+                Live GPS tracking:{" "}
+                {gpsState === "watching"
+                  ? "signal active — sending updates"
+                  : gpsState === "denied"
+                    ? "GPS permission denied"
+                    : gpsState === "offline"
+                      ? "offline — will retry when back online"
+                      : gpsState === "unavailable"
+                        ? "GPS signal unavailable"
+                        : "acquiring GPS fix..."}
+                . Closing the browser or locking your screen pauses web GPS updates.
               </>
             ) : (
-              <>
-                If you haven&apos;t confirmed by {formatClock(j.overdueAfterAt, now)}, we remind you. If still nothing by{" "}
-                {formatClock(j.escalationAt, now)}, we email {name} once. Live location tracking is off.
-              </>
+              <>Live GPS tracking is off for this journey. Use SOS or End journey below.</>
             )}
           </p>
         ) : null}
@@ -284,27 +278,11 @@ export function JourneyPanel({ journey: j }: { journey: JourneyDto }) {
         {live ? (
           <div className="flex flex-col gap-3">
             <Button size="hero" fullWidth loading={complete.isPending} onClick={() => complete.mutate()}>
-              I&apos;ve arrived safely
+              End journey (Arrived safely)
             </Button>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <Button
-                variant="secondary"
-                size="mobile"
-                disabled={extendBlock !== null}
-                aria-describedby={extendBlock ? "extend-reason" : undefined}
-                onClick={() => setExtendOpen(true)}
-              >
-                Extend ETA
-              </Button>
-              <Button variant="secondary" size="mobile" onClick={() => setCancelOpen(true)}>
-                Cancel journey
-              </Button>
-            </div>
-            {extendBlock ? (
-              <p id="extend-reason" className="text-[12px] leading-4 text-text-secondary">
-                {extendBlock}
-              </p>
-            ) : null}
+            <Button variant="secondary" size="mobile" onClick={() => setCancelOpen(true)}>
+              Cancel journey
+            </Button>
           </div>
         ) : null}
       </Card>
@@ -338,28 +316,6 @@ export function JourneyPanel({ journey: j }: { journey: JourneyDto }) {
           </div>
         </Card>
       ) : null}
-
-      <Modal
-        open={extendOpen}
-        onOpenChange={setExtendOpen}
-        title="Extend arrival time"
-        description={`You can extend ${j.extensionsLeft} more time${j.extensionsLeft === 1 ? "" : "s"}. The reminder and the email to ${name} move with it.`}
-      >
-        <div className="flex flex-col gap-2 sm:flex-row">
-          {([15, 30] as const).map((m) => (
-            <Button
-              key={m}
-              variant="secondary"
-              size="mobile"
-              loading={extend.isPending && extend.variables === m}
-              disabled={extend.isPending}
-              onClick={() => extend.mutate(m)}
-            >
-              Add {m} minutes
-            </Button>
-          ))}
-        </div>
-      </Modal>
 
       <ConfirmDialog
         open={cancelOpen}

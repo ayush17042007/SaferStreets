@@ -24,8 +24,8 @@ function ShareLink({ url, onDismiss }: { url: string; onDismiss: () => void }) {
     <Card className="flex flex-col gap-3" aria-label="Share link">
       <h2 className="type-h3">Journey started</h2>
       <p className="text-[14px] leading-5 text-text-secondary">
-        Your contact can open this link to see your first name, destination and expected arrival. It never shows your
-        location. We show it only now, so copy it if you want to send it yourself.
+        Your trusted contact can open this link to see your journey status and last known GPS update if a safety
+        condition occurs. Copy it if you want to share it directly.
       </p>
       <TextField label="Status link" readOnly value={url} onFocus={(e) => e.currentTarget.select()} />
       <div className="flex gap-2">
@@ -72,7 +72,7 @@ function History() {
                 >
                   To {j.destinationText}
                 </Link>
-                <p className="text-[12px] leading-4 text-text-secondary">{formatDateTime(j.expectedArrivalAt)}</p>
+                <p className="text-[12px] leading-4 text-text-secondary">{formatDateTime(j.startedAt)}</p>
               </div>
               <JourneyStatusChip status={j.status} />
             </Card>

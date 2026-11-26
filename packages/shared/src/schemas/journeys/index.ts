@@ -25,9 +25,9 @@ export const startJourneySchema = z.object({
   startText: text(1, 200).optional(),
   startLat: latitudeSchema.optional(),
   startLng: longitudeSchema.optional(),
-  trackingEnabled: z.boolean().optional().default(false),
+  trackingEnabled: z.boolean().optional().default(true),
   routeGeometry: routeGeometrySchema.optional(),
-  expectedArrivalAt: isoDateTimeSchema,
+  expectedArrivalAt: isoDateTimeSchema.optional(),
   emergencyContactId: uuidSchema,
   notes: text(1, 300).optional(),
 });

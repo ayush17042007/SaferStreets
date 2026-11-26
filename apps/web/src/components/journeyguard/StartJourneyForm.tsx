@@ -8,24 +8,19 @@ import {
   Banner,
   Button,
   Card,
-  DateTimePicker,
   Modal,
   Select,
   Skeleton,
   TextArea,
   TextField,
-  cn,
 } from "@/components/ui";
 import { ContactForm } from "@/components/profile/ContactsManager";
 import { ApiError, api } from "@/lib/api";
-import { istInputToIso, istInputValue, newKey } from "@/lib/journeyguard";
+import { newKey } from "@/lib/journeyguard";
 import { DRAFT_JOURNEY_KEY, type DraftJourneyPayload } from "@/lib/saferoute";
 import { LocationPicker, type PickedLocation } from "@/map/LocationPicker";
 import { ACTIVE_KEY, useContacts } from "./hooks";
 
-const MIN_MS = 5 * 60_000;
-const MAX_MS = 24 * 3_600_000;
-const CHIPS = [15, 30, 60] as const;
 const NEW = "__new";
 
 function consumeDraftJourney(): DraftJourneyPayload | null {
@@ -53,13 +48,10 @@ export function StartJourneyForm({ onStarted }: { onStarted: (j: JourneyDto) => 
       : null,
   );
   const [start, setStart] = useState(() => draft?.startText?.slice(0, 200) ?? "");
-  const [eta, setEta] = useState("");
   const [contactId, setContactId] = useState("");
   const [note, setNote] = useState("");
   const [adding, setAdding] = useState(false);
-  const [trackingEnabled, setTrackingEnabled] = useState(
-    () => Boolean(draft && Array.isArray(draft.routeGeometry) && draft.routeGeometry.length >= 2),
-  );
+  const [trackingEnabled, setTrackingEnabled] = useState(true);
   const [startCoords, setStartCoords] = useState<{ lat: number; lng: number } | null>(() =>
     draft && typeof draft.startLat === "number" && typeof draft.startLng === "number"
       ? { lat: draft.startLat, lng: draft.startLng }
@@ -67,6 +59,9 @@ export function StartJourneyForm({ onStarted }: { onStarted: (j: JourneyDto) => 
   );
   const [routeGeometry] = useState<Array<[number, number]> | null>(() =>
     draft && Array.isArray(draft.routeGeometry) && draft.routeGeometry.length >= 2 ? draft.routeGeometry : null,
+  );
+  const [gpsStatus, setGpsStatus] = useState<"idle" | "requesting" | "ready" | "denied" | "unavailable">(() =>
+    draft && typeof draft.startLat === "number" && typeof draft.startLng === "number" ? "ready" : "idle",
   );
   const [gpsNote, setGpsNote] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -104,20 +99,40 @@ export function StartJourneyForm({ onStarted }: { onStarted: (j: JourneyDto) => 
     },
   });
 
-  function pickChip(min: number) {
-    setEta(istInputValue(min * 60_000));
-    setErrors((e) => ({ ...e, expectedArrivalAt: "" }));
+  function requestGpsPermission() {
+    if (!("geolocation" in navigator)) {
+      setGpsStatus("unavailable");
+      setGpsNote("GPS geolocation is not supported in this browser.");
+      return;
+    }
+    setGpsStatus("requesting");
+    setGpsNote("Requesting GPS permission to monitor your route and share your last known location if an alert triggers...");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setStartCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setGpsStatus("ready");
+        setGpsNote(
+          `GPS permission granted (${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}). Live updates will run while this journey is active.`,
+        );
+      },
+      (err) => {
+        const denied = err.code === err.PERMISSION_DENIED;
+        setGpsStatus(denied ? "denied" : "unavailable");
+        setGpsNote(
+          denied
+            ? "Location permission was denied. Allow location access in your browser settings for live GPS protection."
+            : "GPS signal unavailable right now. Tracking will retry automatically once the journey starts.",
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10_000 },
+    );
   }
 
   function submit() {
     setServerError(null);
     const next: Record<string, string> = {};
-    const etaMs = eta ? new Date(istInputToIso(eta)).getTime() : NaN;
-    if (Number.isNaN(etaMs)) next.expectedArrivalAt = "Choose when you expect to arrive.";
-    else if (etaMs < Date.now() + MIN_MS - 60_000) next.expectedArrivalAt = "Pick a time at least 5 minutes from now.";
-    else if (etaMs > Date.now() + MAX_MS) next.expectedArrivalAt = "Pick a time within the next 24 hours.";
     if (!destination.trim()) next.destinationText = "Enter where you are going.";
-    if (!contactId) next.emergencyContactId = "Choose who should hear from us if you are late.";
+    if (!contactId) next.emergencyContactId = "Choose who should hear from us if a safety alert triggers.";
     if (Object.keys(next).length === 0) {
       const parsed = startJourneySchema.safeParse({
         destinationText: destination.trim(),
@@ -126,7 +141,6 @@ export function StartJourneyForm({ onStarted }: { onStarted: (j: JourneyDto) => 
         ...(startCoords ? { startLat: startCoords.lat, startLng: startCoords.lng } : {}),
         trackingEnabled,
         ...(routeGeometry ? { routeGeometry } : {}),
-        expectedArrivalAt: istInputToIso(eta),
         emergencyContactId: contactId,
         ...(note.trim() ? { notes: note.trim() } : {}),
       });
@@ -190,32 +204,42 @@ export function StartJourneyForm({ onStarted }: { onStarted: (j: JourneyDto) => 
         </details>
       </Card>
 
-      <Card className="flex flex-col gap-4">
-        <h2 className="type-h3">When you expect to arrive</h2>
-        <div role="group" aria-label="Quick arrival times" className="flex flex-wrap gap-2">
-          {CHIPS.map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => pickChip(m)}
-              className={cn(
-                "inline-flex h-11 items-center rounded-chip border border-line-control bg-card px-4 text-[14px] leading-5 font-medium text-ink",
-                "hover:bg-neutral-bubble",
-              )}
-            >
-              +{m} min
-            </button>
-          ))}
+      <Card className="flex flex-col gap-3">
+        <h2 className="type-h3">Live GPS protection</h2>
+        <p className="text-[13px] leading-5 text-text-secondary">
+          JourneyGuard uses continuous browser GPS updates while your journey is active to detect route deviations
+          (&gt;250 m), prolonged unexpected stops (&ge;5 min), or lost signal — and shares your last known coordinates
+          with your trusted contact if an alert triggers.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant="secondary"
+            size="mobile"
+            loading={gpsStatus === "requesting"}
+            onClick={requestGpsPermission}
+          >
+            {gpsStatus === "ready" ? "GPS location ready" : "Enable GPS location"}
+          </Button>
+          <label className="flex cursor-pointer items-center gap-2 text-[14px] leading-5">
+            <input
+              type="checkbox"
+              checked={trackingEnabled}
+              onChange={(e) => {
+                setTrackingEnabled(e.target.checked);
+                if (e.target.checked && gpsStatus === "idle") requestGpsPermission();
+              }}
+              className="h-4 w-4 accent-ink"
+            />
+            <span className="font-medium text-ink">Keep live GPS monitoring active</span>
+          </label>
         </div>
-        <DateTimePicker
-          label="Expected arrival (India time)"
-          min={istInputValue(MIN_MS)}
-          max={istInputValue(MAX_MS)}
-          hint="Between 5 minutes and 24 hours from now."
-          value={eta}
-          error={errors.expectedArrivalAt || undefined}
-          onChange={(e) => setEta(e.target.value)}
-        />
+        {routeGeometry ? (
+          <p className="text-[12px] leading-4 text-mint-text">
+            Selected SafeRoute path attached ({routeGeometry.length} waypoints) for deviation monitoring.
+          </p>
+        ) : null}
+        {gpsNote ? <p className="text-[12px] leading-4 text-text-secondary">{gpsNote}</p> : null}
       </Card>
 
       <Card className="flex flex-col gap-4">
@@ -260,53 +284,10 @@ export function StartJourneyForm({ onStarted }: { onStarted: (j: JourneyDto) => 
         />
       </Card>
 
-      <Card className="flex flex-col gap-3">
-        <h2 className="type-h3">Live location &amp; safety monitoring</h2>
-        <label className="flex cursor-pointer items-start gap-3">
-          <input
-            type="checkbox"
-            checked={trackingEnabled}
-            onChange={(e) => {
-              const checked = e.target.checked;
-              setTrackingEnabled(checked);
-              if (checked && !startCoords && "geolocation" in navigator) {
-                setGpsNote("Requesting your current GPS location...");
-                navigator.geolocation.getCurrentPosition(
-                  (pos) => {
-                    setStartCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-                    setGpsNote("GPS ready. Live updates will be sent while this tab stays open.");
-                  },
-                  () => {
-                    setGpsNote("GPS unavailable or denied right now. Live tracking will retry once the journey starts.");
-                  },
-                  { enableHighAccuracy: true, timeout: 10_000 },
-                );
-              } else if (!checked) {
-                setGpsNote(null);
-              }
-            }}
-            className="mt-1 h-4 w-4 accent-ink"
-          />
-          <span className="flex flex-col gap-1 text-[14px] leading-5">
-            <span className="font-medium text-ink">Enable live GPS tracking during this journey</span>
-            <span className="text-[12px] leading-4 text-text-secondary">
-              Monitors route deviations (&gt;250 m), unexpected stops (&ge;5 min), and lost signal while this browser tab
-              is open. Closing the browser or locking your phone pauses web GPS updates.
-            </span>
-          </span>
-        </label>
-        {routeGeometry ? (
-          <p className="text-[12px] leading-4 text-mint-text">
-            Selected SafeRoute path attached ({routeGeometry.length} waypoints) for deviation monitoring.
-          </p>
-        ) : null}
-        {gpsNote ? <p className="text-[12px] leading-4 text-text-secondary">{gpsNote}</p> : null}
-      </Card>
-
       <Banner tone="neutral" icon="alert">
         {trackingEnabled
-          ? "With live tracking on, your location is stored only for this active journey and shared with your trusted contact only if you miss your ETA, deviate, stop unexpectedly, or trigger SOS. SaferStreets cannot dispatch police or ambulance."
-          : "With live tracking off, SaferStreets uses only your expected arrival time and emails your trusted contact once if you don't confirm. It does not contact the police."}
+          ? "Your live GPS location is used only for this active journey and shared with your trusted contact only if you deviate from your route, stop unexpectedly, lose GPS signal, or trigger SOS. SaferStreets cannot dispatch police or ambulance."
+          : "Live GPS tracking is off. Your trusted contact will only be notified if you manually trigger SOS."}
       </Banner>
 
       <Button type="submit" size="hero" loading={create.isPending} fullWidth>
