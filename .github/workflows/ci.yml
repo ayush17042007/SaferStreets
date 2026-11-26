@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: saferstreets
+          POSTGRES_PASSWORD: saferstreets
+          POSTGRES_DB: saferstreets
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U saferstreets -d saferstreets"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://saferstreets:saferstreets@localhost:5432/saferstreets
+      TEST_DATABASE_URL: postgresql://saferstreets:saferstreets@localhost:5432/saferstreets_test
+      APP_ORIGIN: http://localhost:3000
+      API_ORIGIN: http://localhost:4000
+      # CI-only throwaway values; real secrets never live in the repo.
+      SESSION_SECRET: ci-session-secret-not-used-anywhere-else-000000
+      OTP_HMAC_SECRET: ci-otp-hmac-secret-not-used-anywhere-else-0000
+      EMAIL_TRANSPORT: capture
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Spec split is lossless
+        run: pnpm spec:verify
+
+      - name: Design tokens only (no hex or default palette)
+        run: pnpm check:tokens
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Apply migrations
+        run: pnpm db:migrate
+
+      - name: Schema matches migrations (no drift)
+        run: pnpm db:drift
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Install Playwright browser
+        run: pnpm --filter @saferstreets/web exec playwright install --with-deps chromium
+
+      - name: Visual baselines and axe (gallery)
+        # Baselines are per platform (font rendering differs); a platform without baselines records them first.
+        run: pnpm test:e2e -- --update-snapshots=missing
+
+      - name: Dependency audit
+        run: pnpm audit --prod --audit-level high

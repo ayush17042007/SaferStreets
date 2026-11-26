@@ -1,0 +1,136 @@
+@import "tailwindcss";
+@import "../design/tokens.generated.css";
+
+/* No hex values here: every colour comes from design/tokens.ts via tokens.generated.css. */
+
+html {
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 24px;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 360px;
+}
+
+/* Global focus ring (A2): 2px ink outline, offset 2, plus an outer 4px amber glow. */
+:where(a, button, input, textarea, select, summary, [tabindex]):focus-visible,
+.force-focus {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+  box-shadow: var(--focus-glow);
+}
+
+/* Motion (A2). Everything respects prefers-reduced-motion. */
+@keyframes ss-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+@keyframes ss-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 0.2;
+  }
+}
+@keyframes ss-breathe {
+  0%,
+  100% {
+    opacity: 0.16;
+  }
+  50% {
+    opacity: 0.26;
+  }
+}
+@keyframes ss-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20%,
+  60% {
+    transform: translateX(-6px);
+  }
+  40%,
+  80% {
+    transform: translateX(6px);
+  }
+}
+@keyframes ss-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes ss-sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes ss-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-neutral-bubble) 0%,
+    var(--color-neutral-chip) 50%,
+    var(--color-neutral-bubble) 100%
+  );
+  background-size: 200% 100%;
+  animation: ss-shimmer var(--motion-shimmer) linear infinite;
+}
+.pulse-ring {
+  animation: ss-pulse var(--motion-pulse) ease-out infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+.breathe {
+  animation: ss-breathe var(--motion-breathe) ease-in-out infinite;
+}
+.shake {
+  animation: ss-shake 300ms ease-out;
+}
+.spin {
+  animation: ss-spin 700ms linear infinite;
+}
+.sheet-in {
+  animation: ss-sheet-up var(--duration-sheet) var(--ease-out);
+}
+.fade-in {
+  animation: ss-fade-in var(--duration-sheet) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .skeleton {
+    background: var(--color-neutral-chip);
+  }
+}

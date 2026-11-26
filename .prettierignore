@@ -1,0 +1,17 @@
+node_modules
+dist
+.next
+coverage
+pnpm-lock.yaml
+apps/api/src/generated
+apps/api/prisma/migrations
+apps/api/openapi.json
+# Spec sources and the verbatim split are not reformatted (the split must stay byte-identical).
+docs/source
+docs/spec
+CLAUDE.md
+apps/web/src/design/tokens.generated.css
+apps/web/e2e/__screenshots__
+apps/web/playwright-report
+apps/web/test-results
+apps/web/public/maplibre

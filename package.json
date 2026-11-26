@@ -1,0 +1,51 @@
+{
+  "name": "saferstreets",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "prepare": "husky",
+    "dev": "pnpm --parallel --filter @saferstreets/api --filter @saferstreets/web dev",
+    "worker:dev": "pnpm --filter @saferstreets/api worker:dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint . --max-warnings 0 && prettier --check .",
+    "format": "prettier --write .",
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "db:generate": "pnpm --filter @saferstreets/api db:generate",
+    "db:migrate": "pnpm --filter @saferstreets/api db:migrate",
+    "db:migrate:dev": "pnpm --filter @saferstreets/api db:migrate:dev",
+    "db:drift": "pnpm --filter @saferstreets/api db:drift",
+    "db:reset": "pnpm --filter @saferstreets/api db:reset",
+    "db:seed": "pnpm --filter @saferstreets/api db:seed",
+    "admin:bootstrap": "pnpm --filter @saferstreets/api admin:bootstrap",
+    "spec:split": "tsx scripts/split-spec.ts",
+    "spec:verify": "tsx scripts/verify-spec.ts",
+    "tokens:css": "tsx scripts/gen-tokens-css.ts",
+    "check:tokens": "tsx scripts/check-tokens.ts",
+    "test:e2e": "pnpm --filter @saferstreets/web test:e2e"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,mjs,cjs}": [
+      "eslint --max-warnings 0 --no-warn-ignored",
+      "prettier --check"
+    ],
+    "*.{json,md,yml,yaml,css}": "prettier --check"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.15.0",
+    "eslint-config-next": "^16.4.6",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.14.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.2",
+    "prettier": "^3.10.1",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.74.0"
+  }
+}

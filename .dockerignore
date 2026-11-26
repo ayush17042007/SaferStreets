@@ -1,0 +1,17 @@
+node_modules
+.git
+.github
+.husky
+.next
+dist
+coverage
+apps/api/src/generated
+apps/web/.next
+apps/web/e2e
+apps/web/playwright-report
+apps/web/test-results
+apps/web/public/maplibre
+docs/qa
+.env
+.env.*
+!.env.example

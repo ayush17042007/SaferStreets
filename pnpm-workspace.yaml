@@ -1,0 +1,14 @@
+packages:
+  - apps/*
+  - packages/*
+
+allowBuilds:
+  esbuild: true
+  prisma: true
+  "@prisma/engines": true
+  sharp: true
+  unrs-resolver: true
+
+minimumReleaseAgeExclude:
+  - "@types/react@19.3.2"
+  - rate-limiter-flexible@11.6.1

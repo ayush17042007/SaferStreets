@@ -1,0 +1,35 @@
+# Local Postgres 16 for development and tests. Creates two databases:
+#   saferstreets       (DATABASE_URL)
+#   saferstreets_test  (TEST_DATABASE_URL)
+# Host port 5433 so it does not clash with a locally installed Postgres on 5432.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: saferstreets-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: saferstreets
+      POSTGRES_PASSWORD: saferstreets
+      POSTGRES_DB: saferstreets
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saferstreets -d saferstreets"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Local mail catcher: SMTP on 1025, inbox UI on http://localhost:8025 (EMAIL_TRANSPORT=smtp).
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: saferstreets-mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  pgdata:
