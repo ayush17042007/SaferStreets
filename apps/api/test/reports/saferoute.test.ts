@@ -10,18 +10,22 @@ describe("SafeRoute scoring", () => {
       [75.85, 25.18],
       [75.86, 25.18],
     ];
+
     expect(distanceToPolylineM(25.18, 75.855, line)).toBeLessThan(1);
-    // ~0.002 deg north is ~221 m
+
+    // Approximately 221 m north
     const off = distanceToPolylineM(25.182, 75.855, line);
+
     expect(off).toBeGreaterThan(200);
     expect(off).toBeLessThan(240);
   });
 
   it("scores safer routes higher, discounts resolved/rejected reports, and explains recommendation", () => {
     const now = new Date("2026-11-26T12:00:00Z");
+
     const routeA: RawRouteAlternative = {
       id: "route-a",
-      label: "Route 1",
+      summary: "Route 1",
       distanceM: 1200,
       durationS: 600,
       coordinates: [
@@ -29,9 +33,10 @@ describe("SafeRoute scoring", () => {
         [75.86, 25.18],
       ],
     };
+
     const routeB: RawRouteAlternative = {
       id: "route-b",
-      label: "Route 2",
+      summary: "Route 2",
       distanceM: 1400,
       durationS: 720,
       coordinates: [
@@ -90,8 +95,10 @@ describe("SafeRoute scoring", () => {
     );
 
     expect(recommendedRouteId).toBe("route-b");
+
     const a = routes.find((r) => r.id === "route-a")!;
     const b = routes.find((r) => r.id === "route-b")!;
+
     expect(b.safetyScore).toBeGreaterThan(a.safetyScore);
     expect(a.incidentCount).toBe(2);
     expect(a.alertCount).toBe(1);
@@ -102,11 +109,12 @@ describe("SafeRoute scoring", () => {
 
   it("returns 100 when no incidents exist along any route", () => {
     const now = new Date();
+
     const { routes, recommendedRouteId } = scoreRouteAlternatives(
       [
         {
           id: "r1",
-          label: "Route 1",
+          summary: "Route 1",
           distanceM: 500,
           durationS: 300,
           coordinates: [
@@ -119,6 +127,7 @@ describe("SafeRoute scoring", () => {
       [],
       now,
     );
+
     expect(recommendedRouteId).toBe("r1");
     expect(routes[0]!.safetyScore).toBe(100);
   });
@@ -127,15 +136,20 @@ describe("SafeRoute scoring", () => {
 describe("POST /api/v1/saferoute/routes", () => {
   it("returns 503 when no routing provider is configured", async () => {
     const { app } = buildTestApp({ routing: null });
-    const res = await request(app)
-      .post("/api/v1/saferoute/routes")
-      .set(xhr)
-      .send({ originLat: 25.18, originLng: 75.85, destLat: 25.185, destLng: 75.86 });
+
+    const res = await request(app).post("/api/v1/saferoute/routes").set(xhr).send({
+      originLat: 25.18,
+      originLng: 75.85,
+      destLat: 25.185,
+      destLng: 75.86,
+    });
+
     expect(res.status).toBe(503);
   });
 
   it("scores returned route alternatives against real database reports", async () => {
     const reporter = await createUser();
+
     await prisma.report.create({
       data: {
         authorId: reporter.id,
@@ -150,10 +164,11 @@ describe("POST /api/v1/saferoute/routes", () => {
 
     const { app } = buildTestApp({
       routing: {
+        provider: "test",
         getAlternatives: async () => [
           {
             id: "alt-1",
-            label: "Via Main Rd",
+            summary: "Via Main Rd",
             distanceM: 1100,
             durationS: 500,
             coordinates: [
@@ -163,7 +178,7 @@ describe("POST /api/v1/saferoute/routes", () => {
           },
           {
             id: "alt-2",
-            label: "Via Park Ave",
+            summary: "Via Park Ave",
             distanceM: 1300,
             durationS: 600,
             coordinates: [
@@ -175,15 +190,19 @@ describe("POST /api/v1/saferoute/routes", () => {
       },
     });
 
-    const res = await request(app)
-      .post("/api/v1/saferoute/routes")
-      .set(xhr)
-      .send({ originLat: 25.18, originLng: 75.85, destLat: 25.19, destLng: 75.86 });
+    const res = await request(app).post("/api/v1/saferoute/routes").set(xhr).send({
+      originLat: 25.18,
+      originLng: 75.85,
+      destLat: 25.19,
+      destLng: 75.86,
+    });
 
     expect(res.status).toBe(200);
     expect(res.body.data.recommendedRouteId).toBe("alt-2");
     expect(res.body.data.routes).toHaveLength(2);
+
     const alt1 = res.body.data.routes.find((r: { id: string }) => r.id === "alt-1");
+
     expect(alt1.incidentCount).toBe(1);
     expect(alt1.safetyScore).toBeLessThan(100);
   });

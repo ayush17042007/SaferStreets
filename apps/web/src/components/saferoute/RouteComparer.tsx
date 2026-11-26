@@ -1,10 +1,10 @@
 "use client";
 
-import type { CompareRoutesResponseDto, IncidentMapPin, RouteAlternativeDto } from "@saferstreets/shared";
+import type { IncidentMapPin, RouteAlternativeDto } from "@saferstreets/shared";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Banner, Button, Card, Icon, StatusChip, TextField, cn } from "@/components/ui";
 import { lightColors } from "@/design/tokens";
 import { ApiError, api } from "@/lib/api";
@@ -37,12 +37,15 @@ function PlaceSearchField({
 
   const query = typed ?? value?.label ?? "";
   const searching = query.trim().length >= 2 && (!value || query.trim() !== value.label);
+
   const results = searching ? fetchedResults : [];
   const searchError = searching ? fetchedError : null;
 
   useEffect(() => {
     const q = query.trim();
+
     if (!searching) return;
+
     const timer = setTimeout(() => {
       api<{ data: Place[] }>(`/geo/search?q=${encodeURIComponent(q)}`)
         .then((r) => {
@@ -51,6 +54,7 @@ function PlaceSearchField({
         })
         .catch((err) => {
           setFetchedResults([]);
+
           if (err instanceof ApiError && err.status === 401) {
             setFetchedError("Log in to search places, or use your current location.");
           } else if (err instanceof ApiError) {
@@ -60,6 +64,7 @@ function PlaceSearchField({
           }
         });
     }, 300);
+
     return () => clearTimeout(timer);
   }, [query, searching]);
 
@@ -77,9 +82,12 @@ function PlaceSearchField({
             }}
           />
         </div>
+
         {extraAction}
       </div>
+
       {searchError ? <p className="text-[12px] leading-4 text-text-secondary">{searchError}</p> : null}
+
       {results.length > 0 ? (
         <ul
           className="flex flex-col gap-1 rounded-control border border-line bg-card p-1"
@@ -115,9 +123,12 @@ function scoreTone(score: number): "mint" | "amber" | "coral" {
 
 function formatDuration(seconds: number): string {
   const mins = Math.max(1, Math.round(seconds / 60));
+
   if (mins < 60) return `${mins} min`;
+
   const h = Math.floor(mins / 60);
   const m = mins % 60;
+
   return m > 0 ? `${h} hr ${m} min` : `${h} hr`;
 }
 
@@ -127,18 +138,94 @@ function formatDist(meters: number): string {
 
 export function RouteComparer() {
   const router = useRouter();
+
   const [origin, setOrigin] = useState<Place | null>(null);
   const [dest, setDest] = useState<Place | null>(null);
+
   const [gpsStatus, setGpsStatus] = useState<string | null>(null);
+  const [isLiveLocation, setIsLiveLocation] = useState(false);
+
+  const gpsWatchId = useRef<number | null>(null);
+
   const [submitted, setSubmitted] = useState<{
     originLat: number;
     originLng: number;
     destLat: number;
     destLng: number;
   } | null>(null);
+
   const [validationError, setValidationError] = useState<string | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
+
+  function stopLiveLocation(message?: string) {
+    if (gpsWatchId.current !== null) {
+      navigator.geolocation.clearWatch(gpsWatchId.current);
+      gpsWatchId.current = null;
+    }
+
+    setIsLiveLocation(false);
+
+    if (message) {
+      setGpsStatus(message);
+    }
+  }
+
+  function useCurrentLocation() {
+    // Clicking the button again stops live GPS tracking.
+    if (gpsWatchId.current !== null) {
+      stopLiveLocation("Live location stopped.");
+      return;
+    }
+
+    if (!("geolocation" in navigator)) {
+      setGpsStatus("This browser does not support location.");
+      return;
+    }
+
+    setGpsStatus("Waiting for your current GPS location...");
+    setIsLiveLocation(true);
+
+    gpsWatchId.current = navigator.geolocation.watchPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const accuracy = Math.round(position.coords.accuracy);
+
+        // Update the origin whenever the browser receives a new GPS position.
+        setOrigin({
+          label: `Live location (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
+          lat,
+          lng,
+        });
+
+        setGpsStatus(`Live location active · accuracy approximately ${accuracy} m`);
+      },
+      (error) => {
+        if (error.code === error.PERMISSION_DENIED) {
+          stopLiveLocation("Location permission denied. Allow location access in your browser settings.");
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
+          stopLiveLocation("Your device could not determine your location. Check GPS/location services.");
+        } else {
+          stopLiveLocation("GPS timed out. Keep the page open and try again.");
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 20000,
+      },
+    );
+  }
+
+  // Stop the GPS watcher when the component unmounts.
+  useEffect(() => {
+    return () => {
+      if (gpsWatchId.current !== null) {
+        navigator.geolocation.clearWatch(gpsWatchId.current);
+      }
+    };
+  }, []);
 
   const routesQuery = useQuery({
     queryKey: ["saferoute", submitted],
@@ -149,6 +236,7 @@ export function RouteComparer() {
 
   const result = routesQuery.data ?? null;
   const loading = routesQuery.isFetching;
+
   const error =
     validationError ??
     (routesQuery.isError
@@ -165,77 +253,69 @@ export function RouteComparer() {
     }
   }, [result]);
 
-  function useCurrentLocation() {
-    if (!("geolocation" in navigator)) {
-      setGpsStatus("Location is not supported in this browser. Search for your starting point instead.");
-      return;
-    }
-    setGpsStatus("Getting your current location...");
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setOrigin({
-          label: `Current location (${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)})`,
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        });
-        setGpsStatus(null);
-      },
-      (err) => {
-        if (err.code === err.PERMISSION_DENIED) {
-          setGpsStatus("Location permission was denied. Search for your starting point instead.");
-        } else {
-          setGpsStatus("Could not determine your GPS position. Search for your starting point instead.");
-        }
-      },
-      { enableHighAccuracy: true, timeout: 10_000 },
-    );
-  }
-
   async function findRoutes() {
     if (!origin || !dest) {
       setValidationError("Choose both a starting point and a destination.");
       return;
     }
+
     setValidationError(null);
     setSelectedPinId(null);
+
     const next = {
       originLat: origin.lat,
       originLng: origin.lng,
       destLat: dest.lat,
       destLng: dest.lng,
     };
+
     const same =
       submitted &&
       submitted.originLat === next.originLat &&
       submitted.originLng === next.originLng &&
       submitted.destLat === next.destLat &&
       submitted.destLng === next.destLng;
+
     setSubmitted(next);
-    if (same) await routesQuery.refetch();
+
+    if (same) {
+      await routesQuery.refetch();
+    }
   }
 
   function startJourneyWithRoute(route: RouteAlternativeDto) {
     if (!dest) return;
+
     const draft: DraftJourneyPayload = {
       destinationText: dest.label,
       destLat: dest.lat,
       destLng: dest.lng,
-      ...(origin ? { startText: origin.label, startLat: origin.lat, startLng: origin.lng } : {}),
+      ...(origin
+        ? {
+            startText: origin.label,
+            startLat: origin.lat,
+            startLng: origin.lng,
+          }
+        : {}),
       routeGeometry: route.coordinates,
     };
+
     try {
       sessionStorage.setItem(DRAFT_JOURNEY_KEY, JSON.stringify(draft));
     } catch {
-      /* sessionStorage unavailable */
+      // sessionStorage may be unavailable.
     }
+
     router.push("/journeyguard/new");
   }
 
   const mapRoutes = useMemo<MapRoute[]>(() => {
     if (!result) return [];
+
     return result.routes.map((r) => {
       const isSelected = r.id === selectedRouteId;
       const isRec = r.id === result.recommendedRouteId;
+
       return {
         id: r.id,
         coordinates: r.coordinates,
@@ -247,9 +327,28 @@ export function RouteComparer() {
 
   const mapPoints = useMemo<MapPoint[]>(() => {
     const pts: MapPoint[] = [];
-    if (origin) pts.push({ id: "origin", kind: "live", lat: origin.lat, lng: origin.lng, label: origin.label });
-    if (dest) pts.push({ id: "dest", kind: "ride", lat: dest.lat, lng: dest.lng, label: dest.label });
-    // Show all incident pins (reports + alerts) returned by the scoring response.
+
+    if (origin) {
+      pts.push({
+        id: "origin",
+        kind: "live",
+        lat: origin.lat,
+        lng: origin.lng,
+        label: origin.label,
+      });
+    }
+
+    if (dest) {
+      pts.push({
+        id: "dest",
+        kind: "ride",
+        lat: dest.lat,
+        lng: dest.lng,
+        label: dest.label,
+      });
+    }
+
+    // Show incident pins returned by the route-scoring response.
     if (result?.incidentPins) {
       for (const p of result.incidentPins) {
         pts.push({
@@ -261,10 +360,12 @@ export function RouteComparer() {
         });
       }
     }
+
     return pts;
   }, [origin, dest, result]);
 
   const activeRoute = result?.routes.find((r) => r.id === selectedRouteId) ?? result?.routes[0] ?? null;
+
   const selectedPin: IncidentMapPin | null = result?.incidentPins.find((p) => p.id === selectedPinId) ?? null;
 
   return (
@@ -284,10 +385,11 @@ export function RouteComparer() {
           onSelect={setOrigin}
           extraAction={
             <Button type="button" variant="secondary" size="mobile" onClick={useCurrentLocation}>
-              Use my location
+              {isLiveLocation ? "Stop live location" : "Use live location"}
             </Button>
           }
         />
+
         {gpsStatus ? <p className="text-[12px] leading-4 text-text-secondary">{gpsStatus}</p> : null}
 
         <PlaceSearchField label="Destination" placeholder="Where are you going?" value={dest} onSelect={setDest} />
@@ -302,6 +404,7 @@ export function RouteComparer() {
           <Button type="button" loading={loading} onClick={() => void findRoutes()} disabled={!origin || !dest}>
             Find safest route
           </Button>
+
           <span className="text-[12px] leading-4 text-text-secondary">
             Scores reflect community &amp; verified reports on SaferStreets, not guaranteed road conditions.
           </span>
@@ -323,6 +426,7 @@ export function RouteComparer() {
                 {result.routes.map((r) => {
                   const isRec = r.id === result.recommendedRouteId;
                   const isSel = r.id === selectedRouteId;
+
                   return (
                     <li key={r.id}>
                       <Card
@@ -334,8 +438,10 @@ export function RouteComparer() {
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <span className="font-semibold text-ink">{r.summary}</span>
+
                             {isRec ? <StatusChip tone="mint" label="Recommended" icon="check" /> : null}
                           </div>
+
                           <StatusChip tone={scoreTone(r.safetyScore)} label={`Safety ${r.safetyScore}/100`} />
                         </div>
 
@@ -374,6 +480,7 @@ export function RouteComparer() {
                           >
                             {isSel ? "Selected" : "Preview on map"}
                           </Button>
+
                           <Button type="button" size="mobile" variant="amber" onClick={() => startJourneyWithRoute(r)}>
                             Start protected journey
                           </Button>
@@ -403,6 +510,7 @@ export function RouteComparer() {
             onSelect={setSelectedPinId}
             label={activeRoute ? `Map showing ${activeRoute.summary}` : "Route comparison map"}
           />
+
           {selectedPin ? (
             <Card className="flex flex-col gap-2" aria-label="Selected incident details">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -411,8 +519,10 @@ export function RouteComparer() {
                     tone={selectedPin.kind === "alert" ? "coral" : "amber"}
                     label={selectedPin.kind === "alert" ? "SafeAlert" : "Safety Report"}
                   />
+
                   <StatusChip tone="neutral" label={selectedPin.status.replace(/_/g, " ")} />
                 </div>
+
                 <button
                   type="button"
                   onClick={() => setSelectedPinId(null)}
@@ -421,13 +531,17 @@ export function RouteComparer() {
                   Close
                 </button>
               </div>
+
               <p className="text-[14px] font-semibold text-ink">{selectedPin.category.replace(/_/g, " ")}</p>
+
               <p className="text-[13px] leading-5 text-ink">{selectedPin.label}</p>
+
               <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-text-secondary">
                 <span>
                   {selectedPin.lat.toFixed(4)}, {selectedPin.lng.toFixed(4)}
                   {selectedPin.createdAt ? ` · ${new Date(selectedPin.createdAt).toLocaleString("en-IN")}` : ""}
                 </span>
+
                 <Link
                   href={
                     selectedPin.kind === "alert"

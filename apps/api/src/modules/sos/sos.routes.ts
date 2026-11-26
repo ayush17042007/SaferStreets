@@ -31,7 +31,7 @@ export function sosRoutes(deps: {
       responses: { 201: { description: "SOS event created", schema: anyBody } },
       handlers: [
         idempotency({ prisma: deps.prisma, clock: deps.clock }),
-        rateLimit(deps.limiters.alertPost, "user"),
+        rateLimit(deps.limiters.sosTrigger, "user"),
         respond((req) => service.trigger(uid(req), req.body as TriggerSosInput), 201),
       ],
     },
